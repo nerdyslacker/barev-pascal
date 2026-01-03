@@ -21,6 +21,16 @@ type
     procedure OnConnectionState(Buddy: TBarevBuddy; State: TConnectionState);
   end;
 
+type
+  TNetThread = class(TThread)
+  private
+    FClient: TBarevClient;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AClient: TBarevClient);
+  end;
+
 var
   Client: TBarevClient;
   Quit: Boolean;
@@ -31,7 +41,24 @@ var
   Buddy: TBarevBuddy;
   i: Integer;
   tmpNick, tmpAddr: string;
+  NetThread: TNetThread;
 
+
+constructor TNetThread.Create(AClient: TBarevClient);
+begin
+  inherited Create(False);
+  FreeOnTerminate := False;
+  FClient := AClient;
+end;
+
+procedure TNetThread.Execute;
+begin
+  while not Terminated do
+  begin
+    FClient.Process;
+    Sleep(20); // 20ms is fine for interactive
+  end;
+end;
 
 procedure TEventHandler.OnLog(const LogLevel, Message: string);
 begin
@@ -48,6 +75,7 @@ begin
   WriteLn;
   WriteLn('*** Message from ', Buddy.Nick, ': ', MessageText);
   Write('> ');  // Re-show prompt
+  Flush(Output);
 end;
 
 procedure TEventHandler.OnConnectionState(Buddy: TBarevBuddy; State: TConnectionState);
@@ -129,6 +157,8 @@ begin
 
   Parts := TStringList.Create;
   Quit := False;
+
+  NetThread := TNetThread.Create(Client);
 
   try
     while not Quit do
@@ -277,9 +307,22 @@ begin
       end;
     end;
   finally
+
     Parts.Free;
-    Client.Stop;
-    Client.Free;
+
+      if Assigned(NetThread) then
+      begin
+        NetThread.Terminate;
+        NetThread.WaitFor;
+        NetThread.Free;
+      end;
+
+      if Assigned(Client) then
+      begin
+        Client.Stop;   // optional if Free calls destructor that closes sockets anyway
+        Client.Free;
+      end;
+
   end;
 
   WriteLn('Goodbye!');
