@@ -308,8 +308,6 @@ begin
     end;
   finally
 
-    Parts.Free;
-
       if Assigned(NetThread) then
       begin
         NetThread.Terminate;
@@ -322,6 +320,9 @@ begin
         Client.Stop;   // optional if Free calls destructor that closes sockets anyway
         Client.Free;
       end;
+
+      FreeAndNil(Parts);
+      FreeAndNil(Handler);
 
   end;
 
