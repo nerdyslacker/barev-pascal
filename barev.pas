@@ -11,7 +11,7 @@ interface
 
 uses
   Classes, SysUtils, Sockets, DateUtils,
-  BarevTypes, BarevXML, BarevNet;
+  BarevTypes, BarevXML, BarevNet, BarevFT;
 
 type
   { Main Barev client }
@@ -21,6 +21,7 @@ type
     FMyJID: string;
     FMyIPv6: string;
     FPort: Word;
+    FFileTransfer: TBarevFTManager;
     FSocketManager: TBarevSocketManager;
     FBuddies: TList; // List of TBarevBuddy
     FRunning: Boolean;
@@ -33,6 +34,14 @@ type
     FOnLog: TLogEvent;
 
     procedure Log(const Level, Message: string);
+
+    function StripLeadingXMLDecl(const S: string): string;
+    function StripXMLDeclForStanza(const S: string): string;
+
+    function GetMyJID_Internal: string;
+    function GetMyIPv6_Internal: string;
+    procedure SendRawToBuddy(Buddy: TBarevBuddy; const Data: string);
+    function SendToBuddy(Buddy: TBarevBuddy; const Stanza: string): Boolean;
     procedure HandleIncomingConnection;
     procedure HandleBuddyConnection(Buddy: TBarevBuddy);
     procedure ProcessReceivedData(Buddy: TBarevBuddy; const Data: string);
@@ -41,9 +50,7 @@ type
     procedure HandleMessage(Buddy: TBarevBuddy; const XML: string);
     procedure HandlePing(Buddy: TBarevBuddy; const XML: string);
     procedure HandlePong(Buddy: TBarevBuddy; const XML: string);
-
-    function FindBuddyByJID(const JID: string): TBarevBuddy;
-    function FindBuddyByIP(const IP: string): TBarevBuddy;
+    procedure HandleIQ(Buddy: TBarevBuddy; const XML: string);
     procedure TriggerBuddyStatus(Buddy: TBarevBuddy; OldStatus, NewStatus: TBuddyStatus);
     procedure TriggerMessageReceived(Buddy: TBarevBuddy; const MessageText: string);
     procedure TriggerConnectionState(Buddy: TBarevBuddy; State: TConnectionState);
@@ -62,6 +69,8 @@ type
     function GetBuddy(const BuddyJID: string): TBarevBuddy;
     function GetBuddyCount: Integer;
     function GetBuddyByIndex(Index: Integer): TBarevBuddy;
+    function FindBuddyByJID(const JID: string): TBarevBuddy;
+    function FindBuddyByIP(const IP: string): TBarevBuddy;
 
     { Contact list file }
     function LoadContactsFromFile(const FileName: string): Boolean;
@@ -86,6 +95,7 @@ type
     property OnMessageReceived: TMessageReceivedEvent read FOnMessageReceived write FOnMessageReceived;
     property OnConnectionState: TConnectionStateEvent read FOnConnectionState write FOnConnectionState;
     property OnLog: TLogEvent read FOnLog write FOnLog;
+    property FileTransfer: TBarevFTManager read FFileTransfer;
   end;
 
 implementation
@@ -107,6 +117,14 @@ begin
   FSocketManager := TBarevSocketManager.Create(APort);
   FSocketManager.OnLog := @Log;
 
+  FFileTransfer := TBarevFTManager.Create(
+    @SendRawToBuddy,
+    @Log,
+    @GetMyJID_Internal,
+    @GetMyIPv6_Internal
+  );
+
+
   FBuddies := TList.Create;
   FRunning := False;
   FContactsFile := '';
@@ -125,9 +143,92 @@ begin
     TBarevBuddy(FBuddies[i]).Free;
   FBuddies.Free;
 
+  FreeAndNil(FFileTransfer);
   FSocketManager.Free;
   inherited;
 end;
+
+// file transfers
+
+function TBarevClient.StripLeadingXMLDecl(const S: string): string;
+var
+  P: SizeInt;
+begin
+  Result := S;
+
+  { Strip '<?xml ... ?>' if it is at the start }
+  if Pos('<?xml', Result) = 1 then
+  begin
+    P := Pos('?>', Result);
+    if P > 0 then
+    begin
+      Delete(Result, 1, P + 2); { remove through '?>' }
+
+      { trim leading whitespace/newlines after the declaration }
+      while (Length(Result) > 0) and (Result[1] in [#9, #10, #13, ' ']) do
+        Delete(Result, 1, 1);
+    end;
+  end;
+end;
+
+function TBarevClient.StripXMLDeclForStanza(const S: string): string;
+begin
+  { Keep XML declaration ONLY for the opening stream header.
+    Everything else (iq/message/presence/stream end) must NOT include it. }
+  if (Pos('<?xml', S) = 1) and (Pos('<stream:stream', S) = 0) then
+    Result := StripLeadingXMLDecl(S)
+  else
+    Result := S;
+end;
+
+function TBarevClient.SendToBuddy(Buddy: TBarevBuddy; const Stanza: string): Boolean;
+begin
+  Result := False;
+  if (Buddy = nil) or (Buddy.Connection = nil) then Exit;
+  Result := FSocketManager.SendData(Buddy.Connection.Socket, Stanza) > 0;
+end;
+
+
+procedure TBarevClient.HandleIQ(Buddy: TBarevBuddy; const XML: string);
+var
+  Clean: string;
+begin
+  Clean := StripLeadingXMLDecl(XML);
+
+  if Assigned(FFileTransfer) then
+  begin
+    FFileTransfer.HandleIQ(Buddy, Clean);
+    Exit;
+  end;
+
+  Log('DEBUG', 'Unhandled <iq> from ' + Buddy.JID + ': ' + Clean);
+end;
+
+
+
+function TBarevClient.GetMyJID_Internal: string;
+begin
+  Result := FMyJID;
+end;
+
+function TBarevClient.GetMyIPv6_Internal: string;
+begin
+  Result := FMyIPv6;
+end;
+
+procedure TBarevClient.SendRawToBuddy(Buddy: TBarevBuddy; const Data: string);
+var
+  OutData: string;
+begin
+  if (Buddy = nil) or (Buddy.Connection = nil) then
+    Exit;
+
+  { Prevent sending XML declarations inside an established stream }
+  OutData := StripXMLDeclForStanza(Data);
+
+  FSocketManager.SendData(Buddy.Connection.Socket, OutData);
+end;
+
 
 procedure TBarevClient.Log(const Level, Message: string);
 begin
@@ -363,7 +464,11 @@ begin
         else
           CompleteXML := Copy(TempBuffer, 1, Pos('</presence>', TempBuffer) + 10);
 
-        HandlePresence(Buddy, CompleteXML);
+        //HandlePresence(Buddy, CompleteXML);
+        //HandleMessage(Buddy, StripLeadingXMLDecl(CompleteXML));
+        HandlePresence(Buddy, StripLeadingXMLDecl(CompleteXML));
+
+
         Delete(TempBuffer, 1, Length(CompleteXML));
         Conn.RecvBuffer := TempBuffer;
         Continue;
@@ -391,10 +496,20 @@ begin
         else
           CompleteXML := Copy(TempBuffer, 1, Pos('</iq>', TempBuffer) + 4);
 
+        //if IsPing(CompleteXML) then
+        //  HandlePing(Buddy, CompleteXML)
+        //else if IsPong(CompleteXML, Conn.LastPingID) then
+        //  HandlePong(Buddy, CompleteXML);
         if IsPing(CompleteXML) then
           HandlePing(Buddy, CompleteXML)
         else if IsPong(CompleteXML, Conn.LastPingID) then
-          HandlePong(Buddy, CompleteXML);
+          HandlePong(Buddy, CompleteXML)
+        //else if Assigned(FFileTransfer) then
+        //  FFileTransfer.HandleIQ(Buddy, CompleteXML);
+        //else if Pos('<iq', StripLeadingXMLDecl(CompleteXML)) = 1 then
+        else
+          HandleIQ(Buddy, CompleteXML);
+
 
         Delete(TempBuffer, 1, Length(CompleteXML));
         Conn.RecvBuffer := TempBuffer;

@@ -19,6 +19,12 @@ type
     procedure OnBuddyStatus(Buddy: TBarevBuddy; OldStatus, NewStatus: TBuddyStatus);
     procedure OnMessageReceived(Buddy: TBarevBuddy; const MessageText: string);
     procedure OnConnectionState(Buddy: TBarevBuddy; State: TConnectionState);
+
+    // --- File transfer events ---
+    procedure OnFTOffer(Buddy: TBarevBuddy; const Sid, FileName: string; FileSize: Int64);
+    procedure OnFTProgress(Buddy: TBarevBuddy; const Sid: string; BytesDone, BytesTotal: Int64);
+    procedure OnFTComplete(Buddy: TBarevBuddy; const Sid, LocalPath: string);
+    procedure OnFTError(Buddy: TBarevBuddy; const Sid, ErrMsg: string);
   end;
 
 type
@@ -87,6 +93,46 @@ begin
   WriteLn('*** Connection to ', Buddy.Nick, ': ', StateNames[State]);
 end;
 
+procedure TEventHandler.OnFTOffer(Buddy: TBarevBuddy; const Sid, FileName: string; FileSize: Int64);
+begin
+  WriteLn;
+  WriteLn('*** File offer from ', Buddy.JID);
+  WriteLn('    ', FileName, ' (', FileSize, ' bytes)');
+  WriteLn('    SID=', Sid);
+  WriteLn('*** To accept:  acceptfile ', Sid, ' /path/to/save');
+  WriteLn('*** To reject:  rejectfile ', Sid);
+  Write('> ');
+  Flush(Output);
+end;
+
+procedure TEventHandler.OnFTProgress(Buddy: TBarevBuddy; const Sid: string; BytesDone, BytesTotal: Int64);
+begin
+  // Keep it quiet by default (progress can spam the console).
+  // If you want periodic output, uncomment:
+  // WriteLn('*** FT ', Sid, ': ', BytesDone, '/', BytesTotal);
+end;
+
+procedure TEventHandler.OnFTComplete(Buddy: TBarevBuddy; const Sid, LocalPath: string);
+begin
+  WriteLn;
+  WriteLn('*** File transfer complete from ', Buddy.JID);
+  WriteLn('    saved as: ', LocalPath);
+  WriteLn('    SID=', Sid);
+  Write('> ');
+  Flush(Output);
+end;
+
+procedure TEventHandler.OnFTError(Buddy: TBarevBuddy; const Sid, ErrMsg: string);
+begin
+  WriteLn;
+  WriteLn('*** File transfer error from ', Buddy.JID);
+  WriteLn('    SID=', Sid);
+  WriteLn('    ', ErrMsg);
+  Write('> ');
+  Flush(Output);
+end;
+
+
 procedure ShowHelp;
 begin
   WriteLn('Commands:');
@@ -98,6 +144,9 @@ begin
   WriteLn('  status <status> [msg] - Set your status (available/away/dnd)');
   WriteLn('  load <file>           - Load contacts from file');
   WriteLn('  save <file>           - Save contacts to file');
+  WriteLn('  sendfile <nick@ipv6> <path>      - Offer a file to buddy');
+  WriteLn('  acceptfile <sid> <saveas>        - Accept an incoming offer');
+  WriteLn('  rejectfile <sid>                 - Reject an incoming offer');
   WriteLn('  quit                  - Exit the program');
   WriteLn;
 end;
@@ -153,6 +202,17 @@ begin
   Client.OnBuddyStatus     := @Handler.OnBuddyStatus;
   Client.OnMessageReceived := @Handler.OnMessageReceived;
   Client.OnConnectionState := @Handler.OnConnectionState;
+
+  // ---- File transfer event hooks (FPC-friendly) ----
+  if Assigned(Client.FileTransfer) then
+  begin
+    Client.FileTransfer.OnFileOffer := @Handler.OnFTOffer;
+    Client.FileTransfer.OnProgress  := @Handler.OnFTProgress;
+    Client.FileTransfer.OnComplete  := @Handler.OnFTComplete;
+    Client.FileTransfer.OnError     := @Handler.OnFTError;
+  end;
+  // ---- end file transfer hooks ----
+
 
 
   Parts := TStringList.Create;
@@ -300,6 +360,85 @@ begin
                 WriteLn('Failed to save contacts to ', Parts[1]);
             end;
           end;
+         'sendfile':
+           begin
+             if Parts.Count < 3 then
+               WriteLn('Usage: sendfile <nick@ipv6> <path>')
+             else
+             begin
+               // Re-join the filename in case it contains spaces
+               Command := '';
+               for i := 2 to Parts.Count - 1 do
+               begin
+                 if i > 2 then Command := Command + ' ';
+                 Command := Command + Parts[i];
+               end;
+
+               if not Assigned(Client.FileTransfer) then
+                 WriteLn('File transfer not available (Client.FileTransfer is nil)')
+               else
+               begin
+                 // OfferFile expects a TBarevBuddy, so resolve the buddy first
+                 Buddy := Client.GetBuddy(Parts[1]);
+                 if not Assigned(Buddy) then
+                 begin
+                   // fallback: try ConnectToBuddy-style lookup by JID
+                   Buddy := Client.FindBuddyByJID(Parts[1]);
+                 end;
+
+                 if not Assigned(Buddy) then
+                   WriteLn('Unknown buddy: ', Parts[1], ' (add it first)')
+                 else
+                 begin
+                   // OfferFile returns SID (string).
+                   WriteLn('Offering file: ', Command);
+                   WriteLn('SID: ', Client.FileTransfer.OfferFile(Buddy, Command));
+                 end;
+               end;
+             end;
+           end;
+
+         'acceptfile':
+           begin
+             if Parts.Count < 3 then
+               WriteLn('Usage: acceptfile <sid> <saveas>')
+             else
+             begin
+               // join save path if it contains spaces
+               Command := '';
+               for i := 2 to Parts.Count - 1 do
+               begin
+                 if i > 2 then Command := Command + ' ';
+                 Command := Command + Parts[i];
+               end;
+
+               if not Assigned(Client.FileTransfer) then
+                 WriteLn('File transfer not available (Client.FileTransfer is nil)')
+               else
+               begin
+                 if Client.FileTransfer.AcceptOffer(Parts[1], Command) then
+                   WriteLn('Accept started: SID=', Parts[1])
+                 else
+                   WriteLn('Accept failed: SID=', Parts[1]);
+               end;
+             end;
+           end;
+
+         'rejectfile':
+           begin
+             if Parts.Count < 2 then
+               WriteLn('Usage: rejectfile <sid>')
+             else
+             begin
+               if not Assigned(Client.FileTransfer) then
+                 WriteLn('File transfer not available (Client.FileTransfer is nil)')
+               else
+               begin
+                 Client.FileTransfer.RejectOffer(Parts[1]);
+                 WriteLn('Rejected: SID=', Parts[1]);
+               end;
+             end;
+           end;
 
       else
         WriteLn('Unknown command: ', Parts[0]);

@@ -16,6 +16,7 @@ clean:
 install-units:
 	mkdir -p lib
 	$(FPC) $(FPCFLAGS) -FUlib barevtypes.pas
+	$(FPC) $(FPCFLAGS) -FUlib barevft.pas
 	$(FPC) $(FPCFLAGS) -FUlib -Fulib barevxml.pas
 	$(FPC) $(FPCFLAGS) -FUlib -Fulib barevnet.pas
 	$(FPC) $(FPCFLAGS) -FUlib -Fulib barev.pas
