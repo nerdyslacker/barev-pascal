@@ -517,7 +517,7 @@ begin
       end;
     end;
 
-    // If we can't process anything, wait for more data
+    // If we cannot process anything, wait for more data
     Break;
   end;
 
@@ -537,6 +537,15 @@ begin
 
   FromJID := ExtractAttribute(XML, 'from');
   Log('INFO', 'Stream start received from ' + FromJID);
+
+  if not SameText(FromJID, Buddy.JID) then
+  begin
+    Log('ERROR', 'JID mismatch! Expected ' + Buddy.JID + ' but got ' + FromJID);
+    Conn := Buddy.Connection;
+    Buddy.Connection := nil;
+    Conn.Free;
+    Exit;
+  end;
 
   Conn.StreamStartReceived := True;
 
