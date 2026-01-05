@@ -13,6 +13,14 @@ uses
   {$ENDIF}
   Classes, SysUtils, Barev, BarevTypes;
 
+const
+  // Log levels
+  LOG_ERROR = 0;
+  LOG_WARN  = 1;
+  LOG_INFO  = 2;
+  LOG_DEBUG = 3;
+
+
 type
   TEventHandler = class
     procedure OnLog(const LogLevel, Message: string);
@@ -48,6 +56,17 @@ var
   i: Integer;
   tmpNick, tmpAddr: string;
   NetThread: TNetThread;
+  CurrentLogLevel: Integer = LOG_INFO;  // Default: show ERROR, WARN, INFO
+
+
+function GetLogLevelValue(const Level: string): Integer;
+begin
+  if Level = 'ERROR' then Exit(LOG_ERROR);
+  if Level = 'WARN' then Exit(LOG_WARN);
+  if Level = 'INFO' then Exit(LOG_INFO);
+  if Level = 'DEBUG' then Exit(LOG_DEBUG);
+  Result := LOG_INFO;  // Default
+end;
 
 
 constructor TNetThread.Create(AClient: TBarevClient);
@@ -67,8 +86,14 @@ begin
 end;
 
 procedure TEventHandler.OnLog(const LogLevel, Message: string);
+var
+  MsgLevel: Integer;
 begin
-  WriteLn('[', LogLevel, '] ', Message);
+  if CurrentLogLevel < 0 then Exit;  // Silent mode
+
+  MsgLevel := GetLogLevelValue(LogLevel);
+  if MsgLevel <= CurrentLogLevel then
+    WriteLn('[', LogLevel, '] ', Message);
 end;
 
 procedure TEventHandler.OnBuddyStatus(Buddy: TBarevBuddy; OldStatus, NewStatus: TBuddyStatus);
@@ -149,6 +174,54 @@ begin
   WriteLn('  rejectfile <sid>                 - Reject an incoming offer');
   WriteLn('  quit                  - Exit the program');
   WriteLn;
+end;
+
+procedure ShowHelpCLI;
+begin
+  WriteLn('testbarev options:');
+  WriteLn;
+  WriteLn(' --help|-h       This help');
+  WriteLn(' --quiet|-q      Log Level: LOG_ERROR');
+  WriteLn(' --verbose|-v    Log Level: LOG_DEBUG');
+  WriteLn(' --log-level <LEVEL>');
+  WriteLn('     LEVEL can be:');
+  WriteLn('       warn, info, debug');
+  WriteLn(' --silent        Silent');
+end;
+
+procedure ParseCommandLine;
+var
+  i: Integer;
+  Param: string;
+begin
+  CurrentLogLevel := -1;
+  i := 1;  // Initialize
+  while i <= ParamCount do  // Use while instead of for
+  begin
+    Param := ParamStr(i);
+
+    if (Param = '--help') or (Param = '-h') then
+    else if (Param = '--quiet') or (Param = '-q') then
+      CurrentLogLevel := LOG_ERROR
+    else if (Param = '--verbose') or (Param = '-v') then
+      CurrentLogLevel := LOG_DEBUG
+    else if Param = '--silent' then
+      CurrentLogLevel := -1
+    else if Param = '--log-level' then
+    begin
+      if i < ParamCount then
+      begin
+        Inc(i);  // Now OK - consume next parameter
+        Param := ParamStr(i);
+        if Param = 'error' then CurrentLogLevel := LOG_ERROR
+        else if Param = 'warn' then CurrentLogLevel := LOG_WARN
+        else if Param = 'info' then CurrentLogLevel := LOG_INFO
+        else if Param = 'debug' then CurrentLogLevel := LOG_DEBUG;
+      end;
+    end;
+
+    Inc(i);  // Move to next parameter
+  end;
 end;
 
 begin
