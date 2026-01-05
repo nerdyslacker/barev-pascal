@@ -187,6 +187,7 @@ begin
   WriteLn('     LEVEL can be:');
   WriteLn('       warn, info, debug');
   WriteLn(' --silent        Silent');
+  HALT;
 end;
 
 procedure ParseCommandLine;
@@ -194,13 +195,13 @@ var
   i: Integer;
   Param: string;
 begin
-  CurrentLogLevel := -1;
   i := 1;  // Initialize
   while i <= ParamCount do  // Use while instead of for
   begin
     Param := ParamStr(i);
 
     if (Param = '--help') or (Param = '-h') then
+      ShowHelpCLI
     else if (Param = '--quiet') or (Param = '-q') then
       CurrentLogLevel := LOG_ERROR
     else if (Param = '--verbose') or (Param = '-v') then
@@ -228,6 +229,8 @@ begin
   WriteLn('Barev Test Program');
   WriteLn('==================');
   WriteLn;
+
+  ParseCommandLine;
 
   // Get local configuration
   Write('Enter your nick: ');
