@@ -91,6 +91,7 @@ type
     FAvatarHash: string;       // SHA1 hash of avatar
     FAvatarData: string;       // Base64 encoded avatar image data
     FAvatarMimeType: string;   // MIME type of avatar (e.g., image/png)
+    FAvatarPath: string;       // Local filesystem path to saved avatar
   public
     constructor Create(const ANick, AIPv6: string; APort: Word = BAREV_DEFAULT_PORT);
     destructor Destroy; override;
@@ -107,6 +108,7 @@ type
     property AvatarHash: string read FAvatarHash write FAvatarHash;
     property AvatarData: string read FAvatarData write FAvatarData;
     property AvatarMimeType: string read FAvatarMimeType write FAvatarMimeType;
+    property AvatarPath: string read FAvatarPath write FAvatarPath;
   end;
 
   { Connection to a single buddy }
@@ -178,6 +180,7 @@ begin
   FAvatarHash := '';
   FAvatarData := '';
   FAvatarMimeType := '';
+  FAvatarPath := '';
 end;
 
 destructor TBarevBuddy.Destroy;

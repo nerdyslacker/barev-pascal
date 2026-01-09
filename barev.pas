@@ -138,13 +138,13 @@ begin
     Result := LowerCase(JID);
     Exit;
   end;
-  
+
   Nick := Copy(JID, 1, AtPos - 1);
   IPv6 := Copy(JID, AtPos + 1, Length(JID) - AtPos);
-  
+
   // Normalize the IPv6 part using barevtypes.NormalizeIPv6
   IPv6 := NormalizeIPv6(IPv6);
-  
+
   Result := LowerCase(Nick) + '@' + IPv6;
 end;
 
@@ -269,7 +269,7 @@ begin
   for i := 0 to FBuddies.Count - 1 do
   begin
     Buddy := TBarevBuddy(FBuddies[i]);
-    FConfig.AddContact(Buddy.Nick, Buddy.IPv6Address, Buddy.Port);
+    FConfig.AddContact(Buddy.Nick, Buddy.IPv6Address, Buddy.Port, Buddy.AvatarPath);
   end;
 
   Result := FConfig.Save;
@@ -376,7 +376,7 @@ begin
     Exit;
 
   // Bonjour compatibility: send 'active' instead of 'paused'
-  // Pidgin's Bonjour implementation only recognizes composing and active
+  // Pidgins Bonjour implementation only recognizes composing and active
   Stanza := TBarevChatStates.GenerateChatState(csActive, BuddyJID);
   Result := SendToBuddy(Buddy, Stanza);
 end;
@@ -423,7 +423,6 @@ begin
   Result := FSocketManager.SendData(Buddy.Connection.Socket, Stanza) > 0;
 end;
 
-
 procedure TBarevClient.HandleIQ(Buddy: TBarevBuddy; const XML: string);
 var
   Clean: string;
@@ -433,17 +432,17 @@ var
   SavePath: string;
 begin
   Clean := StripLeadingXMLDecl(XML);
-  
+
   Log('DEBUG', 'HandleIQ from ' + Buddy.Nick + ': ' + Clean);
 
   // Check for vCard requests FIRST (before file transfer)
-  if (Pos('<vCard xmlns=''vcard-temp''', Clean) > 0) or 
+  if (Pos('<vCard xmlns=''vcard-temp''', Clean) > 0) or
      (Pos('<vCard xmlns="vcard-temp"', Clean) > 0) then
   begin
     Log('DEBUG', 'Detected vCard request');
     IQType := ExtractIQAttribute(Clean, 'type');
     IQ_ID := ExtractIQAttribute(Clean, 'id');
-    
+
     Log('DEBUG', 'vCard IQType=' + IQType + ' ID=' + IQ_ID);
 
     if IQType = 'get' then
@@ -470,9 +469,14 @@ begin
         SavePath := FAvatarManager.SaveBuddyAvatar(Buddy.Nick, Buddy.IPv6Address,
                                                      AvatarData, MimeType);
         if SavePath <> '' then
+        begin
+          Buddy.AvatarPath := SavePath;
           Log('INFO', 'Saved avatar for ' + Buddy.Nick + ' to ' + SavePath)
-        else
+        end
+       else
+        begin
           Log('WARN', 'Failed to save avatar for ' + Buddy.Nick);
+        end
       end
       else
       begin
@@ -504,8 +508,6 @@ begin
     // Don't exit - FT handler will log if unhandled
   end;
 end;
-
-
 
 function TBarevClient.GetMyJID_Internal: string;
 begin
@@ -992,7 +994,6 @@ var
 begin
   Result := nil;
   NormalizedSearchJID := NormalizeJID(JID);
-  
   for i := 0 to FBuddies.Count - 1 do
   begin
     if NormalizeJID(TBarevBuddy(FBuddies[i]).JID) = NormalizedSearchJID then
