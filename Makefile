@@ -2,11 +2,11 @@
 
 FPC = fpc
 FPCFLAGS = -O2 -gl -Xs -XX
-UNITS = barevtypes.pas barevxml.pas barevnet.pas barev.pas
+#UNITS = barevtypes.pas barevxml.pas barevnet.pas barev.pas
 
 all: install-units
 		$(FPC) $(FPCFLAGS) testbarev.pas
-		$(FPC) -fPIC -Cg -Xs libbarev.pas
+		$(FPC) -fPIC -Cg -Xs barev_c_api.pas
 #testbarev: $(UNITS) testbarev.pas
 #	$(FPC) $(FPCFLAGS) testbarev.pas
 
